@@ -1,0 +1,9 @@
+boto3
+dotenv
+fastapi
+pydantic
+uvicorn
+mangum
+firebase-admin
+passlib
+python-jose
