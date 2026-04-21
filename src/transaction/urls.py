@@ -38,7 +38,7 @@ async def add_transaction(transaction: CreateTransaction):
         )
 
 
-@router.get("/user/{user_id}")
+@router.post("/user/{user_id}", status_code=status.HTTP_200_OK)
 async def fetch_user_transactions(
     user_id: str, limit: Optional[int] = Query(None, ge=1, le=100)
 ):

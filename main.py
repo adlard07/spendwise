@@ -4,17 +4,23 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from mangum import Mangum
 
-from src.auth.signup import router as auth_router
+from src.auth.url import router as auth_router
 from src.category.urls import router as category_router
 from src.expense.urls import router as expense_router
 from src.transaction.urls import router as transaction_router
 
 app = FastAPI()
 
+origins = [
+    "http://localhost",
+    "http://localhost:3000",
+    "https://",
+]
+
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

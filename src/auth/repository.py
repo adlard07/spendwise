@@ -1,50 +1,61 @@
 import os
+import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from passlib.context import CryptContext
-from jose import JWTError, jwt
-from fastapi import Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer
 from dotenv import load_dotenv
+from fastapi import HTTPException, status
+from fastapi.security import OAuth2PasswordBearer
+from jose import JWTError, jwt
+from passlib.context import CryptContext
 
-from src.models.users import User, UserInDB
 from src.database.dynamo.services import DatabaseServices
-
+from src.models.users import User, UserInDB
 
 load_dotenv(override=True)
 
 
-class Authentication:
+class AuthenticationRepository:
     def __init__(self):
-        self.SECRET_KEY = os.getenv("SECRET")
+        self.SECRET_KEY: str = os.getenv("SECRET_KEY")
         self.ALGORITHM = os.getenv("ALGORITHM", "HS256")
         self.access_token_expire_mins = int(
             os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30")
         )
         self.pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
         self.oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/token")
-        self.dbs = DatabaseServices
+        self.dbs = DatabaseServices()
 
-    # ---- password helpers ----
-
-    def verify_password(self, plain_password: str, hashed_password: str) -> bool:
-        return self.pwd_context.verify(plain_password, hashed_password)
+    # ==== helpers ====
 
     def get_password_hash(self, password: str) -> str:
         return self.pwd_context.hash(password)
 
-    # ---- user authentication ----
+    def verify_password(self, plain_password: str, hashed_password: str) -> bool:
+        try:
+            return self.pwd_context.verify(plain_password, hashed_password)
+        except Exception:
+            return plain_password == hashed_password
 
-    def authenticate_user(self, username: str, password: str) -> Optional[UserInDB]:
-        user = self.dbs.get_user(username)
+    # ==== user authentication ====
+
+    def authenticate_user(self, email: str, password: str):
+        user = self.dbs.get_user(email=email)
+        print("User:", user)
+        print("\n")
         if not user:
             return None
-        if not self.verify_password(password, user.hashed_password):
+
+        stored_hash = user.get("password")
+        if not stored_hash:
             return None
+
+        if not self.verify_password(password, stored_hash):
+            return None
+
         return user
 
-    # ---- token helpers ----
+    # ==== token ====
 
     def create_access_token(
         self, data: dict, expires_delta: Optional[timedelta] = None
@@ -58,7 +69,7 @@ class Authentication:
         to_encode.update({"exp": expire})
         return jwt.encode(to_encode, self.SECRET_KEY, algorithm=self.ALGORITHM)
 
-    # ---- FastAPI dependency methods ----
+    # ==== FastAPI dependency methods ====
 
     async def get_current_user(self, token: str) -> User:
         credentials_exception = HTTPException(
@@ -67,9 +78,7 @@ class Authentication:
             headers={"WWW-Authenticate": "Bearer"},
         )
         try:
-            payload = jwt.decode(
-                token, self.SECRET_KEY, algorithms=[self.ALGORITHM]
-            )
+            payload = jwt.decode(token, self.SECRET_KEY, algorithms=[self.ALGORITHM])
             username: str = payload.get("sub")
             if username is None:
                 raise credentials_exception
@@ -86,29 +95,10 @@ class Authentication:
             raise HTTPException(status_code=400, detail="Inactive user")
         return user
 
+    def generate_csrf_token(self) -> str:
+        return secrets.token_urlsafe(32)
 
-auth = Authentication()
-
-# Re-export constants / schemes that url.py needs
-oauth2_scheme = auth.oauth2_scheme
-access_token_expire_mins = auth.access_token_expire_mins
-
-
-def get_password_hash(password: str) -> str:
-    return auth.get_password_hash(password)
-
-
-def authenticate_user(username: str, password: str) -> Optional[UserInDB]:
-    return auth.authenticate_user(username, password)
-
-
-def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
-    return auth.create_access_token(data, expires_delta)
-
-
-async def get_current_user(token: str = Depends(oauth2_scheme),) -> User:
-    return await auth.get_current_user(token)
-
-
-async def get_current_active_user(current_user: User = Depends(get_current_user),) -> User:
-    return await auth.get_current_active_user(current_user)
+    def validate_csrf_token(self, cookie_token: str, header_token: str) -> bool:
+        if not cookie_token or not header_token:
+            return False
+        return secrets.compare_digest(cookie_token, header_token)

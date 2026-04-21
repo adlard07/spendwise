@@ -22,7 +22,7 @@ class DatabaseServices:
     def _table(self, table_name: str):
         """Get a DynamoDB Table resource."""
         try:
-            return self.dynamo_client.dynamodb.Table(table_name)
+            return self.dynamo_client.dynamodb.Table(table_name)  # type: ignore
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
 
@@ -90,7 +90,7 @@ class DatabaseServices:
 
             kwargs = {"FilterExpression": filter_expression}
             if limit:
-                kwargs["Limit"] = limit
+                kwargs["Limit"] = limit  # type: ignore
 
             response = table.scan(**kwargs)
             items = response.get("Items", [])
@@ -120,7 +120,7 @@ class DatabaseServices:
 
             kwargs = {"KeyConditionExpression": Key(key_name).eq(key_value)}
             if limit:
-                kwargs["Limit"] = limit
+                kwargs["Limit"] = limit  # type: ignore
 
             response = table.query(**kwargs)
             items = response.get("Items", [])
@@ -172,12 +172,13 @@ class DatabaseServices:
             raise HTTPException(status_code=500, detail=str(e))
 
     # Authenticate users
-    def get_user(self, username: str) -> Optional[Dict[str, Any]]:
+    def get_user(self, email: str) -> Optional[Dict[str, Any]]:
         """Fetch a user by username (partition key)."""
         try:
             table = self._table(self.users_table)
             response = table.query(
-                KeyConditionExpression=Key("username").eq(username),
+                IndexName="email-index",
+                KeyConditionExpression=Key("email").eq(email),
                 Limit=1,
             )
             items = response.get("Items", [])
