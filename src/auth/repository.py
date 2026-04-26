@@ -1,7 +1,7 @@
 import os
 import secrets
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from dotenv import load_dotenv
 from fastapi import HTTPException, status
@@ -17,7 +17,7 @@ load_dotenv(override=True)
 
 class AuthenticationRepository:
     def __init__(self):
-        self.SECRET_KEY: str = os.getenv("SECRET_KEY")
+        self.SECRET_KEY = str(os.getenv("SECRET_KEY"))
         self.ALGORITHM = os.getenv("ALGORITHM", "HS256")
         self.access_token_expire_mins = int(
             os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30")
@@ -71,7 +71,7 @@ class AuthenticationRepository:
 
     # ==== FastAPI dependency methods ====
 
-    async def get_current_user(self, token: str) -> User:
+    async def get_current_user(self, token: str) -> Optional[Dict[str, Any]]:
         credentials_exception = HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Could not validate credentials",
@@ -79,7 +79,7 @@ class AuthenticationRepository:
         )
         try:
             payload = jwt.decode(token, self.SECRET_KEY, algorithms=[self.ALGORITHM])
-            username: str = payload.get("sub")
+            username: str | None = payload.get("sub")
             if username is None:
                 raise credentials_exception
         except JWTError:

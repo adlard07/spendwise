@@ -7,6 +7,7 @@ from mangum import Mangum
 from src.auth.url import router as auth_router
 from src.category.urls import router as category_router
 from src.expense.urls import router as expense_router
+from src.extras.urls import router as extras_router
 from src.transaction.urls import router as transaction_router
 
 app = FastAPI()
@@ -31,6 +32,7 @@ app.include_router(auth_router)
 app.include_router(transaction_router)
 app.include_router(expense_router)
 app.include_router(category_router)
+app.include_router(extras_router)
 
 
 @app.exception_handler(RequestValidationError)

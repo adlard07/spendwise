@@ -79,7 +79,7 @@ async def login(payload: LoginRequest):
             )
 
         access_token = create_access_token(
-            data={"sub": user.get("email")},
+            data={"email": user.get("email"), "user_id": user.get("user_id")},
             expires_delta=timedelta(minutes=access_token_expire_mins),
         )
         return Token(access_token=access_token, token_type="bearer")

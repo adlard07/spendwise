@@ -7,21 +7,16 @@ from pydantic import BaseModel, Field
 from utils.utils import generate_uuid, get_current_timestamp
 
 
-class IncomeType(str, Enum):
-    INCOME: str = "income"
-    EXPENSE: str = "expense"
-    TRANSFER: str = "transfer"
-
-
 class CreateTransaction(BaseModel):
     transaction_id: str = Field(default_factory=generate_uuid)
     user_id: str
     amount: float
-    transaction_type: IncomeType = IncomeType.EXPENSE
+    title: str
+    notes: Optional[str] = None
+    transaction_type: Literal["income", "expense", "transfer"] = "expense"
     timestamp: Optional[datetime] = Field(default_factory=get_current_timestamp)
     merchant_id: Optional[str] = None
     category_id: Optional[str] = None
-    notes: Optional[str] = None
     attachments: Optional[List[str]] = None
     source: Optional[str] = None
     is_duplicate: Optional[bool] = False
@@ -54,3 +49,7 @@ class UpdateTransaction(BaseModel):
 
     class Config:
         json_encoders = {datetime: lambda v: v.isoformat()}
+
+
+class RequestTransaction(BaseModel):
+    user_id: str

@@ -2,7 +2,11 @@ from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query, status
 
-from src.models.transaction import CreateTransaction, UpdateTransaction
+from src.models.transaction import (
+    CreateTransaction,
+    RequestTransaction,
+    UpdateTransaction,
+)
 from src.transaction.services import (
     create_transaction,
     delete_transaction,
@@ -38,12 +42,14 @@ async def add_transaction(transaction: CreateTransaction):
         )
 
 
-@router.post("/user/{user_id}", status_code=status.HTTP_200_OK)
+@router.post("/user", status_code=status.HTTP_200_OK)
 async def fetch_user_transactions(
-    user_id: str, limit: Optional[int] = Query(None, ge=1, le=100)
+    payload: RequestTransaction, limit: Optional[int] = Query(None, ge=1, le=100)
 ):
     """Get all transactions for a user."""
     try:
+        user_id = payload.user_id
+        print("User ID:\n", user_id)
         results = get_user_transactions(user_id, limit)
         return {"success": True, "data": results, "count": len(results)}
     except Exception as e:
