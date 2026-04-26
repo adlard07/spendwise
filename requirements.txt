@@ -5,5 +5,9 @@ pydantic
 uvicorn
 mangum
 firebase-admin
-passlib
-python-jose
+python-jose[cryptography]
+passlib[argon2]
+argon2-cffi
+python-dotenv
+pytest
+pytest-asyncio

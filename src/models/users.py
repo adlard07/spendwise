@@ -12,9 +12,9 @@ class Role(str):
 
 
 class Currency(str):
-    INR: str = "INR"
-    USD: str = "USD"
-    EUR: str = "EUR"
+    INR = "INR"
+    USD = "USD"
+    EUR = "EUR"
 
 
 class CreateUser(BaseModel):
@@ -42,9 +42,11 @@ class CreateUser(BaseModel):
 
 
 class User(BaseModel):
+    user_id: str
     username: str
-    email: Optional[str] = None
-    disabled: Optional[bool] = False
+    email: str
+    role: str = Role.USER
+    disabled: bool = False
 
 
 class UserInDB(User):
