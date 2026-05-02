@@ -1,232 +1,188 @@
 import os
-from typing import Any, Dict, List
+from decimal import Decimal
 
-from fastapi import (
-    APIRouter,
-    Cookie,
-    Depends,
-    Header,
-    HTTPException,
-    Request,
-    Response,
-    status,
-)
+import boto3
+from boto3.dynamodb.conditions import Key
+from botocore.config import Config
+from dotenv import load_dotenv
 
-from src.auth.services import (
-    create_api_key,
-    generate_csrf_token,
-    get_current_active_user,
-    get_password_hash,
-    list_api_keys,
-    login,
-    logout,
-    logout_all,
-    revoke_api_key,
-    rotate_refresh_token,
-    validate_csrf_token,
-)
-from src.database.dynamo.services import DatabaseServices
-from src.models.auth import (
-    APIKeyCreate,
-    APIKeyCreatedResponse,
-    APIKeyPublic,
-    LoginRequest,
-    LogoutRequest,
-    RefreshRequest,
-    SignupResponse,
-    Token,
-)
-from src.models.users import CreateUser, User
-
-router = APIRouter(tags=["authentication"], prefix="/auth")
-dbs = DatabaseServices()
+load_dotenv(override=True)
 
 
-# =========================================================================
-# CSRF
-# =========================================================================
-
-
-@router.get("/csrf-token")
-def get_csrf_token(response: Response):
-    token = generate_csrf_token()
-    response.set_cookie(
-        key="csrf_token",
-        value=token,
-        httponly=False,
-        samesite="strict",
-        secure=os.getenv("ENV") == "production",
-    )
-    return {"csrf_token": token}
-
-
-def _check_csrf(
-    csrf_token: str = Cookie(default=None),
-    x_csrf_token: str = Header(default=None),
-) -> None:
-    if not validate_csrf_token(csrf_token, x_csrf_token):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="CSRF token invalid or missing",
+class DynamoInit:
+    def __init__(self):
+        self.aws_access_key_id = os.getenv("AWS_ACCESS_KEY_ID")
+        self.aws_secret_access_key = os.getenv("AWS_SECRET_ACCESS_KEY")
+        self.region_name = os.getenv("AWS_REGION_NAME")
+        self.config = Config(
+            max_pool_connections=int(os.getenv("MAX_POOL_CONNECTIONS", 50)),
+            connect_timeout=int(os.getenv("CONNECTION_TIMEOUT", 5)),
+            read_timeout=int(os.getenv("READ_TIMEOUT", 60)),
+            retries={
+                "max_attempts": int(os.getenv("MAX_ATTEMPT", 3)),
+                "mode": "adaptive",
+            },
+        )
+        self.dynamodb = boto3.resource(
+            "dynamodb",
+            aws_access_key_id=self.aws_access_key_id,
+            aws_secret_access_key=self.aws_secret_access_key,
+            region_name=self.region_name,
+            config=self.config,
         )
 
 
-# =========================================================================
-# Signup
-# =========================================================================
+class DynamoClient:
+    def __init__(self):
+        self.init = DynamoInit()
+        self.dynamodb = self.init.dynamodb
+
+    def _get_table(self, table_name: str):
+        return self.dynamodb.Table(table_name)  # type: ignore
+
+    @staticmethod
+    def _sanitize(obj):
+        if isinstance(obj, float):
+            return Decimal(str(obj))
+        if isinstance(obj, dict):
+            return {k: DynamoClient._sanitize(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [DynamoClient._sanitize(v) for v in obj]
+        return obj
+
+    def put_item(
+        self, table_name: str, item: dict, condition: str | None = None
+    ) -> dict:
+        table = self._get_table(table_name)
+        params = {"Item": self._sanitize(item)}
+        if condition:
+            params["ConditionExpression"] = condition
+        return table.put_item(**params)
+
+    def get_item(
+        self, table_name: str, key: dict, consistent: bool = False
+    ) -> dict | None:
+        table = self._get_table(table_name)
+        resp = table.get_item(Key=key, ConsistentRead=consistent)
+        return resp.get("Item")
+
+    def query_by_key(
+        self,
+        table_name: str,
+        pk_name: str,
+        pk_value,
+        sk_condition=None,
+        index_name: str | None = None,
+        scan_forward: bool = True,
+        limit: int | None = None,
+    ) -> list[dict]:
+        table = self._get_table(table_name)
+        key_expr = Key(pk_name).eq(pk_value)
+        if sk_condition is not None:
+            key_expr = key_expr & sk_condition
+
+        params = {
+            "KeyConditionExpression": key_expr,
+            "ScanIndexForward": scan_forward,
+        }
+        if index_name:
+            params["IndexName"] = index_name
+        if limit:
+            params["Limit"] = limit
+
+        items = []
+        while True:
+            resp = table.query(**params)
+            items.extend(resp.get("Items", []))
+            if "LastEvaluatedKey" not in resp:
+                break
+            params["ExclusiveStartKey"] = resp["LastEvaluatedKey"]
+        return items
+
+    def update_one(
+        self,
+        table_name: str,
+        key: dict,
+        updates: dict,
+        condition: str | None = None,
+    ) -> dict:
+        table = self._get_table(table_name)
+
+        expr_parts, attr_names, attr_values = [], {}, {}
+        for i, (field, value) in enumerate(updates.items()):
+            placeholder_name = f"#f{i}"
+            placeholder_val = f":v{i}"
+            expr_parts.append(f"{placeholder_name} = {placeholder_val}")
+            attr_names[placeholder_name] = field
+            attr_values[placeholder_val] = self._sanitize(value)
+
+        params = {
+            "Key": key,
+            "UpdateExpression": "SET " + ", ".join(expr_parts),
+            "ExpressionAttributeNames": attr_names,
+            "ExpressionAttributeValues": attr_values,
+            "ReturnValues": "ALL_NEW",
+        }
+        if condition:
+            params["ConditionExpression"] = condition
+
+        resp = table.update_item(**params)
+        return resp.get("Attributes")
+
+    # ── DELETE ──
+
+    def delete_one(
+        self, table_name: str, key: dict, condition: str | None = None
+    ) -> dict:
+        table = self._get_table(table_name)
+        params = {
+            "Key": key,
+            "ReturnValues": "ALL_OLD",
+        }
+        if condition:
+            params["ConditionExpression"] = condition
+        resp = table.delete_item(**params)
+        return resp.get("Attributes")
+
+    def query_by_filter(
+        self,
+        table_name: str,
+        pk_name: str,
+        pk_value,
+        sk_condition=None,
+        filter_expression=None,
+        index_name: str | None = None,
+        scan_forward: bool = True,
+        limit: int | None = None,
+    ) -> list[dict]:
+        table = self._get_table(table_name)
+        key_expr = Key(pk_name).eq(pk_value)
+        if sk_condition is not None:
+            key_expr = key_expr & sk_condition
+
+        params = {
+            "KeyConditionExpression": key_expr,
+            "ScanIndexForward": scan_forward,
+        }
+        if index_name:
+            params["IndexName"] = index_name
+        if filter_expression is not None:
+            params["FilterExpression"] = filter_expression
+        if limit:
+            params["Limit"] = limit
+
+        items = []
+        while True:
+            resp = table.query(**params)
+            items.extend(resp.get("Items", []))
+            if "LastEvaluatedKey" not in resp:
+                break
+            params["ExclusiveStartKey"] = resp["LastEvaluatedKey"]
+        return items
 
 
-@router.post(
-    "/signup",
-    response_model=SignupResponse,
-    status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(_check_csrf)],
-)
-async def signup(payload: CreateUser):
-    existing = dbs.get_user_by_email(str(payload.email))
-    if existing:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Email already registered",
-        )
-    payload.password = get_password_hash(payload.password)
-    dbs.create_user(payload)
-    return SignupResponse(
-        message="User created successfully",
-        username=payload.username,
-        user_id=payload.user_id,
-    )
-
-
-# =========================================================================
-# Login
-# =========================================================================
-
-
-@router.post(
-    "/login",
-    response_model=Token,
-    dependencies=[Depends(_check_csrf)],
-)
-async def login_route(payload: LoginRequest, request: Request):
-    user_agent = request.headers.get("user-agent")
-    ip_address = request.client.host if request.client else None
-
-    access_token, refresh_token = login(
-        email=payload.email,
-        password=payload.password,
-        user_agent=user_agent,
-        ip_address=ip_address,
-    )
-    return Token(access_token=access_token, refresh_token=refresh_token)
-
-
-# =========================================================================
-# Refresh
-# =========================================================================
-
-
-@router.post("/refresh", response_model=Token)
-async def refresh_route(payload: RefreshRequest, request: Request):
-    user_agent = request.headers.get("user-agent")
-    ip_address = request.client.host if request.client else None
-
-    access_token, new_refresh_token = rotate_refresh_token(
-        raw_token=payload.refresh_token,
-        user_agent=user_agent,
-        ip_address=ip_address,
-    )
-    return Token(access_token=access_token, refresh_token=new_refresh_token)
-
-
-# =========================================================================
-# Logout
-# =========================================================================
-
-
-@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
-async def logout_route(payload: LogoutRequest):
-    logout(payload.refresh_token)
-
-
-@router.post("/logout-all", status_code=status.HTTP_204_NO_CONTENT)
-async def logout_all_route(
-    current_user: Dict[str, Any] = Depends(get_current_active_user),
-):
-    logout_all(current_user["user_id"])
-
-
-# =========================================================================
-# Current user
-# =========================================================================
-
-
-@router.get("/users/me", response_model=User)
-async def read_users_me(
-    current_user: Dict[str, Any] = Depends(get_current_active_user),
-):
-    return User(
-        user_id=current_user["user_id"],
-        username=current_user["username"],
-        email=current_user["email"],
-        role=current_user.get("role", "user"),
-        disabled=current_user.get("disabled", False),
-    )
-
-
-# =========================================================================
-# API Keys  (MCP server integration)
-# JWT auth required to manage keys; keys are used separately with X-API-Key
-# =========================================================================
-
-
-@router.post(
-    "/api-keys",
-    response_model=APIKeyCreatedResponse,
-    status_code=status.HTTP_201_CREATED,
-)
-async def create_api_key_route(
-    payload: APIKeyCreate,
-    current_user: Dict[str, Any] = Depends(get_current_active_user),
-):
-    raw_key, record = create_api_key(
-        user_id=current_user["user_id"],
-        name=payload.name,
-        scopes=payload.scopes,
-    )
-    return APIKeyCreatedResponse(
-        key_id=record["key_id"],
-        name=record["name"],
-        prefix=record["prefix"],
-        scopes=record["scopes"],
-        created_at=record["created_at"],
-        raw_key=raw_key,
-    )
-
-
-@router.get("/api-keys", response_model=List[APIKeyPublic])
-async def list_api_keys_route(
-    current_user: Dict[str, Any] = Depends(get_current_active_user),
-):
-    records = list_api_keys(current_user["user_id"])
-    return [
-        APIKeyPublic(
-            key_id=r["key_id"],
-            name=r["name"],
-            prefix=r["prefix"],
-            scopes=r.get("scopes", []),
-            created_at=r["created_at"],
-            last_used_at=r.get("last_used_at"),
-            revoked_at=r.get("revoked_at"),
-            revoked=r.get("revoked", False),
-        )
-        for r in records
-    ]
-
-
-@router.delete("/api-keys/{key_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def revoke_api_key_route(
-    key_id: str,
-    current_user: Dict[str, Any] = Depends(get_current_active_user),
-):
-    revoke_api_key(key_id=key_id, requesting_user_id=current_user["user_id"])
+if __name__ == "__main__":
+    client = DynamoClient()
+    tables = list(client.dynamodb.tables.all())  # type: ignore
+    print("Tables:", tables)
+    print("DynamoDB client initialized successfully.")

@@ -1,5 +1,8 @@
 .env
 expense-tracker-firebase-config.json
 test.py
+test.json
+
 __pycache__/
 venv/
+tmp

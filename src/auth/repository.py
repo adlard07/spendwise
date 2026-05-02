@@ -160,8 +160,36 @@ class AuthenticationRepository:
         ip_address: Optional[str] = None,
     ) -> Tuple[str, str]:
         user = self.dbs.get_user_by_email(email)
+        print(user)
 
-        if not user or not self.verify_password(password, user.get("password", "")):
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Incorrect email or password",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        stored_password = user.get("password", "")
+
+        password_valid = False
+
+        try:
+            password_valid = (
+                self.verify_password(password, stored_password)
+                or password == stored_password
+            )
+        except Exception:
+            password_valid = False
+
+        # Case 2: DB password is plain text, only for old/testing users
+        # if not password_valid and password == stored_password:
+        #     password_valid = True
+
+        #     # Optional but recommended: migrate plain password to hash
+        #     hashed_password = self.get_password_hash(password)
+        #     self.dbs.update_user(user["user_id"], updates={"password": hashed_password})
+
+        if not password_valid:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Incorrect email or password",
@@ -170,7 +198,8 @@ class AuthenticationRepository:
 
         if user.get("disabled"):
             raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN, detail="Account is disabled"
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Account is disabled",
             )
 
         return self._issue_token_pair(

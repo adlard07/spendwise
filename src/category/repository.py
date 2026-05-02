@@ -1,15 +1,16 @@
+import os
 from typing import Any, Dict, List, Optional
 
 from boto3.dynamodb.conditions import Attr
 
-from src.database.dynamo.services import DynamoClient
+from src.database.dynamo.initialize import DynamoClient
 from src.models.categories import CreateCategory, UpdateCategory
 
 
 class CategoryRepository:
     def __init__(self):
         self.db = DynamoClient()
-        self.table_name = "expense-tracker-categories"
+        self.table_name = os.getenv("CATEGORIES_TABLE", "expense-tracker-categories")
         self.PK = "user_id"
         self.SK = "category_id"
 

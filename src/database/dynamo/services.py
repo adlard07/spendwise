@@ -19,9 +19,16 @@ class DatabaseServices:
             aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
             aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
         )
-        self.users = self._dynamodb.Table(os.getenv("USERS_TABLE", "users"))  # type: ignore
-        self.sessions = self._dynamodb.Table(os.getenv("SESSIONS_TABLE", "sessions"))  # type: ignore
-        self.api_keys = self._dynamodb.Table(os.getenv("API_KEYS_TABLE", "api_keys"))  # type: ignore
+        self.users = self._dynamodb.Table(os.getenv("USERS_TABLE_NAME", "users"))  # type: ignore
+        self.sessions = self._dynamodb.Table(  # type: ignore
+            os.getenv("SESSIONS_TABLE_NAME", "sessions")
+        )
+        self.api_keys = self._dynamodb.Table(  # type: ignore
+            os.getenv("API_KEYS_TABLE_NAME", "api_keys")
+        )
+
+    def _get_database_all_tables(self) -> List[str]:
+        return [table.name for table in self._dynamodb.tables.all()]  # type: ignore
 
     # =========================================================================
     # Users
@@ -163,3 +170,8 @@ class DatabaseServices:
             KeyConditionExpression=Key("user_id").eq(user_id),
         )
         return resp.get("Items", [])
+
+
+if __name__ == "__main__":
+    services = DatabaseServices()
+    print(services._get_database_all_tables())

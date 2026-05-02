@@ -2,7 +2,7 @@ from typing import Any, Dict, List, Optional
 
 from boto3.dynamodb.conditions import Attr, Key
 
-from src.database.dynamo.services import DynamoClient
+from src.database.dynamo.initialize import DynamoClient
 from src.models.transaction import CreateTransaction, UpdateTransaction
 
 

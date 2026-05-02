@@ -21,7 +21,7 @@ class CreateUser(BaseModel):
     user_id: str = Field(default_factory=generate_uuid)
     first_name: str
     last_name: str
-    username: Optional[str] = None
+    username: Optional[str] | None = None
     email: EmailStr
     password: str
     created_at: Optional[datetime.datetime] = Field(

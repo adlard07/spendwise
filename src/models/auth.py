@@ -22,7 +22,7 @@ class LoginRequest(BaseModel):
 
 class SignupResponse(BaseModel):
     message: str
-    username: str
+    username: str | None
     user_id: str
 
 

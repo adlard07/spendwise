@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from src.database.dynamo.services import DynamoClient
+from src.database.dynamo.initialize import DynamoClient
 
 MetricResult = dict[str, Any]
 MetricName = Literal[

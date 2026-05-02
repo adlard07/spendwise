@@ -42,11 +42,6 @@ router = APIRouter(tags=["authentication"], prefix="/auth")
 dbs = DatabaseServices()
 
 
-# =========================================================================
-# CSRF
-# =========================================================================
-
-
 @router.get("/csrf-token")
 def get_csrf_token(response: Response):
     token = generate_csrf_token()
@@ -83,19 +78,24 @@ def _check_csrf(
     dependencies=[Depends(_check_csrf)],
 )
 async def signup(payload: CreateUser):
-    existing = dbs.get_user_by_email(str(payload.email))
-    if existing:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Email already registered",
+    try:
+        existing = dbs.get_user_by_email(str(payload.email))
+        if existing:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Email already registered",
+            )
+        payload.password = get_password_hash(payload.password)
+        dbs.create_user(payload)
+        return SignupResponse(
+            message="User created successfully",
+            username=payload.username,
+            user_id=payload.user_id,
         )
-    payload.password = get_password_hash(payload.password)
-    dbs.create_user(payload)
-    return SignupResponse(
-        message="User created successfully",
-        username=payload.username,
-        user_id=payload.user_id,
-    )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
+        )
 
 
 # =========================================================================
@@ -109,16 +109,21 @@ async def signup(payload: CreateUser):
     dependencies=[Depends(_check_csrf)],
 )
 async def login_route(payload: LoginRequest, request: Request):
-    user_agent = request.headers.get("user-agent")
-    ip_address = request.client.host if request.client else None
+    try:
+        user_agent = request.headers.get("user-agent")
+        ip_address = request.client.host if request.client else None
 
-    access_token, refresh_token = login(
-        email=payload.email,
-        password=payload.password,
-        user_agent=user_agent,
-        ip_address=ip_address,
-    )
-    return Token(access_token=access_token, refresh_token=refresh_token)
+        access_token, refresh_token = login(
+            email=payload.email,
+            password=payload.password,
+            user_agent=user_agent,
+            ip_address=ip_address,
+        )
+        return Token(access_token=access_token, refresh_token=refresh_token)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
+        )
 
 
 # =========================================================================
